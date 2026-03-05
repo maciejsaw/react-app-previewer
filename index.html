@@ -7,7 +7,6 @@
  
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    // Ensure Tailwind properly supports the manual dark mode class toggling
     tailwind.config = { darkMode: 'class' }
   </script>
 
@@ -71,26 +70,52 @@
     const codeInput = document.getElementById('code-input');
     const errorBar = document.getElementById('error-bar');
 
-    // Display error messages gracefully
+    // --- UTILITIES ---
     function showError(message) {
       errorBar.textContent = `Error: ${message}`;
       errorBar.classList.remove('hidden');
     }
 
-    // Catch unhandled runtime errors inside the rendered module
+    // Safely encode to Base64 supporting UTF-8
+    function encodeCode(code) {
+      const bytes = new TextEncoder().encode(code);
+      const binString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("");
+      return btoa(binString);
+    }
+
+    // Safely decode Base64 back to UTF-8
+    function decodeCode(base64) {
+      const binString = atob(base64);
+      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+
     window.addEventListener('error', (e) => {
       showError(e.message);
     });
 
-    runBtn.addEventListener('click', () => {
-      const rawCode = codeInput.value;
+    // Mark session prior to unloading to detect a manual refresh
+    window.addEventListener('beforeunload', () => {
+      sessionStorage.setItem('isReloading', 'true');
+    });
+
+    // --- CORE RUN LOGIC ---
+    function runCode(rawCode) {
       if (!rawCode.trim()) return;
 
-      // 1. Hide Editor, Show Preview
+      // 1. Update URL Hash with encoded code
+      try {
+        window.location.hash = encodeCode(rawCode);
+      } catch (e) {
+        showError("Failed to encode code into URL.");
+        return;
+      }
+
+      // 2. Hide Editor, Show Preview
       document.body.classList.add('show-preview');
       errorBar.classList.add('hidden');
 
-      // 2. Inject React DOM rendering logic to mount the user's exported App
+      // 3. Inject React DOM rendering logic
       const runnerCode = `
         import { createRoot } from 'react-dom/client';
         const rootElement = document.getElementById('preview-root');
@@ -100,17 +125,16 @@
       const fullCode = rawCode + '\n' + runnerCode;
 
       try {
-        // 3. Compile JSX -> standard JS using Babel Standalone
-        // We only use the 'react' preset so ES module imports/exports stay intact.
+        // 4. Compile JSX -> standard JS
         const transpiled = Babel.transform(fullCode, {
           presets: ['react']
         }).code;
 
-        // 4. Create an executable Blob URL
+        // 5. Create an executable Blob URL
         const blob = new Blob([transpiled], { type: 'application/javascript' });
         const scriptUrl = URL.createObjectURL(blob);
 
-        // 5. Inject as a module script so it uses the Import Map
+        // 6. Inject as a module script
         const script = document.createElement('script');
         script.type = 'module';
         script.src = scriptUrl;
@@ -120,6 +144,37 @@
 
       } catch (err) {
         showError(err.message);
+      }
+    }
+
+    // --- EVENT LISTENERS ---
+    runBtn.addEventListener('click', () => {
+      runCode(codeInput.value);
+    });
+
+    // Handle initial load / pasted URLs
+    window.addEventListener('DOMContentLoaded', () => {
+      // Decode URI Component in case the browser escaped characters like '='
+      const rawHash = window.location.hash.slice(1);
+      const hash = decodeURIComponent(rawHash);
+     
+      if (hash) {
+        try {
+          const decoded = decodeCode(hash);
+          codeInput.value = decoded; // Populate editor
+         
+          // Check if this is a manual refresh using sessionStorage
+          const isReload = sessionStorage.getItem('isReloading') === 'true';
+          sessionStorage.removeItem('isReloading');
+         
+          // Auto-run if it's a freshly shared link. Stay in editor if refreshed.
+          if (!isReload) {
+            runCode(decoded);
+          }
+        } catch (err) {
+          showError("Invalid or corrupted code in URL. Could not parse the hash fragment.");
+          window.history.replaceState(null, null, window.location.pathname + window.location.search);
+        }
       }
     });
   </script>
