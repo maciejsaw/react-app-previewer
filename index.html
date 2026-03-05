@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React Playground</title>
+ 
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Ensure Tailwind properly supports the manual dark mode class toggling
+    tailwind.config = { darkMode: 'class' }
+  </script>
+
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react"
+      }
+    }
+  </script>
+
+  <style>
+    /* App state transitions */
+    #preview-container { display: none; }
+    body.show-preview #editor-container { display: none; }
+    body.show-preview #preview-container { display: block; }
+
+    /* Custom scrollbar for editor */
+    textarea::-webkit-scrollbar { width: 8px; }
+    textarea::-webkit-scrollbar-track { background: #1e293b; }
+    textarea::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+  </style>
+</head>
+<body class="bg-slate-900 h-screen w-screen overflow-hidden font-sans">
+
+  <div id="editor-container" class="h-full flex flex-col p-6 max-w-5xl mx-auto space-y-4">
+    <div>
+      <h1 class="text-3xl font-extrabold text-white">React Previewer</h1>
+      <p class="text-slate-400 mt-1">Paste your React + Tailwind + Lucide component below.</p>
+    </div>
+   
+    <textarea
+      id="code-input"
+      class="flex-1 w-full bg-slate-800 text-slate-100 p-5 rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none shadow-inner"
+      placeholder="Paste your code here..."
+      spellcheck="false"
+    ></textarea>
+   
+    <button
+      id="run-btn"
+      class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-xl shadow-lg shadow-blue-500/20 transition-all hover:-translate-y-0.5"
+    >
+      Run & Preview Fullscreen
+    </button>
+  </div>
+
+
+  <div id="preview-container" class="h-full w-full relative bg-white dark:bg-slate-900">
+    <div id="error-bar" class="hidden absolute top-0 left-0 right-0 bg-red-600 text-white p-3 text-sm z-50 font-mono shadow-md"></div>
+   
+    <div id="preview-root" class="h-full w-full overflow-auto"></div>
+  </div>
+
+
+  <script>
+    const runBtn = document.getElementById('run-btn');
+    const codeInput = document.getElementById('code-input');
+    const errorBar = document.getElementById('error-bar');
+
+    // Display error messages gracefully
+    function showError(message) {
+      errorBar.textContent = `Error: ${message}`;
+      errorBar.classList.remove('hidden');
+    }
+
+    // Catch unhandled runtime errors inside the rendered module
+    window.addEventListener('error', (e) => {
+      showError(e.message);
+    });
+
+    runBtn.addEventListener('click', () => {
+      const rawCode = codeInput.value;
+      if (!rawCode.trim()) return;
+
+      // 1. Hide Editor, Show Preview
+      document.body.classList.add('show-preview');
+      errorBar.classList.add('hidden');
+
+      // 2. Inject React DOM rendering logic to mount the user's exported App
+      const runnerCode = `
+        import { createRoot } from 'react-dom/client';
+        const rootElement = document.getElementById('preview-root');
+        const root = createRoot(rootElement);
+        root.render(<App />);
+      `;
+      const fullCode = rawCode + '\n' + runnerCode;
+
+      try {
+        // 3. Compile JSX -> standard JS using Babel Standalone
+        // We only use the 'react' preset so ES module imports/exports stay intact.
+        const transpiled = Babel.transform(fullCode, {
+          presets: ['react']
+        }).code;
+
+        // 4. Create an executable Blob URL
+        const blob = new Blob([transpiled], { type: 'application/javascript' });
+        const scriptUrl = URL.createObjectURL(blob);
+
+        // 5. Inject as a module script so it uses the Import Map
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = scriptUrl;
+       
+        script.onerror = () => showError("Failed to execute the React code.");
+        document.body.appendChild(script);
+
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+  </script>
+</body>
+</html>
