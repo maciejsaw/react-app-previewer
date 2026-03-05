@@ -76,18 +76,38 @@
       errorBar.classList.remove('hidden');
     }
 
-    // Safely encode to Base64 supporting UTF-8
-    function encodeCode(code) {
+    // Compress and encode to Base64 using gzip + UTF-8
+    async function encodeCode(code) {
       const bytes = new TextEncoder().encode(code);
-      const binString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("");
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        }
+      });
+      const compressedStream = stream.pipeThrough(new CompressionStream('gzip'));
+      const compressedResponse = new Response(compressedStream);
+      const compressedBlob = await compressedResponse.blob();
+      const compressedBytes = new Uint8Array(await compressedBlob.arrayBuffer());
+      const binString = Array.from(compressedBytes, (byte) => String.fromCodePoint(byte)).join("");
       return btoa(binString);
     }
 
-    // Safely decode Base64 back to UTF-8
-    function decodeCode(base64) {
+    // Decode Base64 and decompress using gzip
+    async function decodeCode(base64) {
       const binString = atob(base64);
-      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0));
-      return new TextDecoder().decode(bytes);
+      const compressedBytes = Uint8Array.from(binString, (m) => m.codePointAt(0));
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(compressedBytes);
+          controller.close();
+        }
+      });
+      const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
+      const decompressedResponse = new Response(decompressedStream);
+      const decompressedBlob = await decompressedResponse.blob();
+      const decompressedBytes = new Uint8Array(await decompressedBlob.arrayBuffer());
+      return new TextDecoder().decode(decompressedBytes);
     }
 
     window.addEventListener('error', (e) => {
@@ -100,12 +120,12 @@
     });
 
     // --- CORE RUN LOGIC ---
-    function runCode(rawCode) {
+    async function runCode(rawCode) {
       if (!rawCode.trim()) return;
 
       // 1. Update URL Hash with encoded code
       try {
-        window.location.hash = encodeCode(rawCode);
+        window.location.hash = await encodeCode(rawCode);
       } catch (e) {
         showError("Failed to encode code into URL.");
         return;
@@ -153,14 +173,14 @@
     });
 
     // Handle initial load / pasted URLs
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
       // Decode URI Component in case the browser escaped characters like '='
       const rawHash = window.location.hash.slice(1);
       const hash = decodeURIComponent(rawHash);
      
       if (hash) {
         try {
-          const decoded = decodeCode(hash);
+          const decoded = await decodeCode(hash);
           codeInput.value = decoded; // Populate editor
          
           // Check if this is a manual refresh using sessionStorage
