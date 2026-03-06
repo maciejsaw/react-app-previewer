@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>React Playground</title>
+  <title>React & HTML Playground</title>
  
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -38,8 +38,8 @@
 
   <div id="editor-container" class="h-full flex flex-col p-6 max-w-5xl mx-auto space-y-4">
     <div>
-      <h1 class="text-3xl font-extrabold text-white">React Previewer</h1>
-      <p class="text-slate-400 mt-1">Paste your React + Tailwind + Lucide component below.</p>
+      <h1 class="text-3xl font-extrabold text-white">Previewer</h1>
+      <p class="text-slate-400 mt-1">Paste your React component (must define 'App') OR pure HTML below.</p>
     </div>
    
     <textarea
@@ -57,13 +57,11 @@
     </button>
   </div>
 
-
   <div id="preview-container" class="h-full w-full relative bg-white dark:bg-slate-900">
     <div id="error-bar" class="hidden absolute top-0 left-0 right-0 bg-red-600 text-white p-3 text-sm z-50 font-mono shadow-md"></div>
    
     <div id="preview-root" class="h-full w-full overflow-auto"></div>
   </div>
-
 
   <script>
     const runBtn = document.getElementById('run-btn');
@@ -135,35 +133,55 @@
       document.body.classList.add('show-preview');
       errorBar.classList.add('hidden');
 
-      // 3. Inject React DOM rendering logic
-      const runnerCode = `
-        import { createRoot } from 'react-dom/client';
-        const rootElement = document.getElementById('preview-root');
-        const root = createRoot(rootElement);
-        root.render(<App />);
-      `;
-      const fullCode = rawCode + '\n' + runnerCode;
+      const rootElement = document.getElementById('preview-root');
+      
+      // Clear out the previous render
+      rootElement.innerHTML = '';
 
-      try {
-        // 4. Compile JSX -> standard JS
-        const transpiled = Babel.transform(fullCode, {
-          presets: ['react']
-        }).code;
+      // 3. Auto-detect Mode: React vs Pure HTML
+      // If the code contains a definition for an 'App' component, assume React. Otherwise, HTML fallback.
+      const isReact = /(function\s+App|const\s+App|let\s+App|var\s+App|class\s+App)/.test(rawCode);
 
-        // 5. Create an executable Blob URL
-        const blob = new Blob([transpiled], { type: 'application/javascript' });
-        const scriptUrl = URL.createObjectURL(blob);
+      if (!isReact) {
+        // --- HTML FALLBACK MODE ---
+        try {
+          // Using a ContextualFragment allows standard <script> tags within the HTML paste to execute
+          const fragment = document.createRange().createContextualFragment(rawCode);
+          rootElement.appendChild(fragment);
+        } catch (err) {
+          showError("Failed to render HTML: " + err.message);
+        }
+      } else {
+        // --- REACT MODE ---
+        const runnerCode = `
+          import { createRoot } from 'react-dom/client';
+          const rootElement = document.getElementById('preview-root');
+          const root = createRoot(rootElement);
+          root.render(<App />);
+        `;
+        const fullCode = rawCode + '\n' + runnerCode;
 
-        // 6. Inject as a module script
-        const script = document.createElement('script');
-        script.type = 'module';
-        script.src = scriptUrl;
-       
-        script.onerror = () => showError("Failed to execute the React code.");
-        document.body.appendChild(script);
+        try {
+          // 4. Compile JSX -> standard JS
+          const transpiled = Babel.transform(fullCode, {
+            presets: ['react']
+          }).code;
 
-      } catch (err) {
-        showError(err.message);
+          // 5. Create an executable Blob URL
+          const blob = new Blob([transpiled], { type: 'application/javascript' });
+          const scriptUrl = URL.createObjectURL(blob);
+
+          // 6. Inject as a module script
+          const script = document.createElement('script');
+          script.type = 'module';
+          script.src = scriptUrl;
+         
+          script.onerror = () => showError("Failed to execute the React code.");
+          document.body.appendChild(script);
+
+        } catch (err) {
+          showError(err.message);
+        }
       }
     }
 
@@ -174,7 +192,6 @@
 
     // Handle initial load / pasted URLs
     window.addEventListener('DOMContentLoaded', async () => {
-      // Decode URI Component in case the browser escaped characters like '='
       const rawHash = window.location.hash.slice(1);
       const hash = decodeURIComponent(rawHash);
      
@@ -183,11 +200,9 @@
           const decoded = await decodeCode(hash);
           codeInput.value = decoded; // Populate editor
          
-          // Check if this is a manual refresh using sessionStorage
           const isReload = sessionStorage.getItem('isReloading') === 'true';
           sessionStorage.removeItem('isReloading');
          
-          // Auto-run if it's a freshly shared link. Stay in editor if refreshed.
           if (!isReload) {
             runCode(decoded);
           }
